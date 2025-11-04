@@ -1,44 +1,60 @@
+# streamlit_app.py
 import streamlit as st
 import pandas as pd
 import joblib
-from sklearn.preprocessing import StandardScaler
+import seaborn as sns
+import matplotlib.pyplot as plt
+from sklearn.metrics import confusion_matrix, roc_curve, roc_auc_score, accuracy_score, classification_report
 
-# Load saved model and scaler if saved separately
+# Load model and scaler
 model = joblib.load("logistic_regression_model.pkl")
+scaler = joblib.load("scaler.pkl")
 
-# Since you trained StandardScaler in Python script, load it if saved
-# If you didn't save, re-fit scaler on whole dataset for prediction purposes
+st.title("🔬 Breast Cancer Prediction using Logistic Regression")
+st.write("Upload patient data to predict whether tumor is **Malignant** or **Benign**.")
 
-# 🔹 Load and prepare data for scaler (same as training dataset)
-data = pd.read_csv("breast_cancer_data.csv")
-data = data.drop(['id', 'diagnosis', 'Unnamed: 32'], axis=1)
+uploaded_file = st.file_uploader("Upload test CSV file", type=["csv"])
 
-scaler = StandardScaler()
-scaler.fit(data)
+if uploaded_file:
+    data = pd.read_csv(uploaded_file)
 
-st.title("Breast Cancer Prediction App 🩺")
-st.write("Enter patient tumor measurements to predict whether tumor is **Benign (0)** or **Malignant (1)**.")
+    st.subheader("📂 Input Data")
+    st.write(data.head())
 
-# UI input fields
-def user_inputs():
-    inputs = {}
-    for col in data.columns:
-        inputs[col] = st.number_input(f"{col}", value=float(data[col].mean()))
+    X = data.drop(['id', 'diagnosis', 'Unnamed: 32'], axis=1, errors='ignore')
     
-    return pd.DataFrame([inputs])
+    # Scale input data
+    X_scaled = scaler.transform(X)
 
-input_df = user_inputs()
+    # Predict
+    preds = model.predict(X_scaled)
+    data["Prediction"] = preds
+    data["Prediction"] = data["Prediction"].map({1: "Malignant", 0: "Benign"})
 
-# Prediction
-if st.button("Predict Diagnosis"):
-    scaled_features = scaler.transform(input_df)
-    prediction = model.predict(scaled_features)
-    prediction_prob = model.predict_proba(scaled_features)[0][1]
+    st.subheader("✅ Predictions")
+    st.write(data[["Prediction"]])
 
-    st.write("### ✅ Prediction Result:")
-    if prediction[0] == 1:
-        st.error(f"**Malignant** (Cancer Detected) ⚠️\nProbability: {prediction_prob:.2f}")
-    else:
-        st.success(f"**Benign** (Non-Cancer) ✅\nProbability: {prediction_prob:.2f}")
+    # Evaluation (if true labels exist)
+    if "diagnosis" in data.columns:
+        y_true = data["diagnosis"]
+        cm = confusion_matrix(y_true, preds)
+        acc = accuracy_score(y_true, preds)
 
+        st.write(f"**Accuracy:** {acc:.4f}")
+        st.subheader("Confusion Matrix")
+        fig, ax = plt.subplots()
+        sns.heatmap(cm, annot=True, fmt='d', ax=ax)
+        st.pyplot(fig)
 
+        # ROC Curve
+        y_prob = model.predict_proba(X_scaled)[:, 1]
+        fpr, tpr, _ = roc_curve(y_true, y_prob)
+        auc = roc_auc_score(y_true, y_prob)
+
+        fig2, ax2 = plt.subplots()
+        ax2.plot(fpr, tpr, label=f"AUC={auc:.2f}")
+        ax2.plot([0,1], [0,1], 'k--')
+        st.subheader("ROC Curve")
+        st.pyplot(fig2)
+else:
+    st.info("👆 Upload a file to test the model.")
